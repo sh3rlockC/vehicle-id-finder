@@ -133,6 +133,28 @@ node skills/vehicle-id-finder/scripts/find_vehicle_ids_playwright.js --json "风
 - 懂车帝站内搜索结果可能很脏，优先相信经过 Tavily + 页面回填校验后的结果
 - Python 版现在已经适合做轻量稳定提取；Playwright 版适合后续继续增强
 
+## 测试
+
+### 本地最小回归
+
+```bash
+python3 scripts/test_cases.py
+```
+
+当前内置了两个样例：
+- `风云X3PLUS`
+- `风云T11`
+
+### GitHub Actions
+
+仓库提供了一个最小 CI：
+- Python 脚本语法检查
+- Node / Playwright 脚本语法检查
+
+说明：
+- 目前 Actions 默认不跑真实联网回归，避免外部站点波动导致 CI 频繁误报
+- 真正的联网回归仍建议在本地或人工巡检时执行
+
 ## 打包
 
 如果要打成 `.skill`：

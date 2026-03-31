@@ -18,10 +18,22 @@ function matchesQuery(text, query) {
   return false;
 }
 
+function normalizeQueryVariants(query) {
+  const variants = [query];
+  const spaced = query
+    .replace(/([A-Za-z0-9])(?=(PLUS|PRO|MAX|EV|DM|L)\b)/gi, '$1 ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (spaced && !variants.includes(spaced)) variants.push(spaced);
+  const compact = query.replace(/\s+/g, '');
+  if (compact && !variants.includes(compact)) variants.push(compact);
+  return variants;
+}
+
 async function verifyPage(page, url, query) {
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
     const title = await page.title().catch(() => '');
     const body = await page.locator('body').innerText().catch(() => '');
     const text = `${title}\n${body}`;
@@ -33,8 +45,37 @@ async function verifyPage(page, url, query) {
 
 async function verifyAutohomeSeries(page, seriesId, query) {
   const url = `https://k.autohome.com.cn/${seriesId}?dimensionid=10&order=0&yearid=0#listcontainer`;
-  const ok = await verifyPage(page, url, query);
-  return ok ? url : null;
+  return (await verifyPage(page, url, query)) ? url : null;
+}
+
+async function verifyDongchediSeries(page, seriesId, query) {
+  const url = `https://www.dongchedi.com/auto/series/${seriesId}`;
+  return (await verifyPage(page, url, query)) ? url : null;
+}
+
+async function searchTavily(query) {
+  // Playwright 版先走 OpenClaw 已配置的 Tavily HTTP 接口环境变量
+  const apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) return [];
+  try {
+    const res = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query,
+        max_results: 8,
+        search_depth: 'basic',
+        include_answer: false,
+        include_raw_content: false,
+      }),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.results || [];
+  } catch {
+    return [];
+  }
 }
 
 async function findAutohome(page, query) {
@@ -48,9 +89,9 @@ async function findAutohome(page, query) {
 
   for (const searchUrl of searchUrls) {
     try {
-      await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-    } catch (e) {
+      await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+    } catch {
       continue;
     }
 
@@ -97,17 +138,9 @@ async function findAutohome(page, query) {
   for (const c of candidates.slice(0, 20)) {
     if (c.kind === 'koubei_series') {
       const verifiedUrl = await verifyAutohomeSeries(page, c.id, query);
-      if (verifiedUrl) {
-        return { best: { ...c, url: verifiedUrl }, candidates };
-      }
+      if (verifiedUrl) return { best: { ...c, url: verifiedUrl }, candidates };
     } else if (c.kind === 'main_series') {
-      if (await verifyPage(page, c.url, query)) {
-        return { best: c, candidates };
-      }
-    } else if (c.kind === 'koubei_spec') {
-      if (await verifyPage(page, c.url, query)) {
-        c.note = 'spec页命中，仅作车型证据，非最终seriesId';
-      }
+      if (await verifyPage(page, c.url, query)) return { best: c, candidates };
     }
   }
 
@@ -115,31 +148,65 @@ async function findAutohome(page, query) {
 }
 
 async function findDongchedi(page, query) {
-  const searchUrl = `https://www.dongchedi.com/auto/library/x-x-x-x-x-x-x-x-x-x-${encodeURIComponent(query)}`;
-  await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-
-  const links = await page.locator('a[href*="/auto/series/"]').evaluateAll(els =>
-    els.map(a => ({ href: a.href, text: (a.textContent || '').trim() }))
-  ).catch(() => []);
-
+  const queryVariants = normalizeQueryVariants(query);
   const candidates = [];
   const seen = new Set();
-  for (const item of links) {
-    const m = item.href.match(/https?:\/\/www\.dongchedi\.com\/auto\/series\/(\d+)/);
-    if (!m) continue;
-    const id = m[1];
-    const url = `https://www.dongchedi.com/auto/series/${id}`;
-    const key = `${id}|${url}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    candidates.push({ id, url, title: item.text });
+
+  for (const qv of queryVariants) {
+    const tavilyQueries = [
+      `site:dongchedi.com/auto/params ${qv}`,
+      `site:dongchedi.com ${qv} 口碑`,
+      `site:dongchedi.com ${qv} 评价`
+    ];
+
+    for (const tq of tavilyQueries) {
+      const results = await searchTavily(tq);
+      for (const item of results) {
+        const url = item.url || '';
+        const title = item.title || '';
+        const snippet = item.snippet || item.content || '';
+        const text = `${url}\n${title}\n${snippet}`;
+        if (!matchesQuery(`${title}\n${snippet}`, query)) continue;
+
+        const patterns = [
+          { re: /\/auto\/series\/(\d+)/g, kind: 'series' },
+          { re: /\/community\/(\d+)(?:\/wenda)?/g, kind: 'community' },
+          { re: /\/auto\/params-carIds-(?:x-)?(\d+)/g, kind: 'params' },
+        ];
+
+        for (const p of patterns) {
+          for (const m of text.matchAll(p.re)) {
+            const id = m[1];
+            const key = `${id}|${p.kind}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            candidates.push({
+              id,
+              url: `https://www.dongchedi.com/auto/series/${id}`,
+              kind: p.kind,
+              source: `tavily:${tq}`,
+              evidenceUrl: url,
+              evidenceText: `${title}\n${snippet}`,
+            });
+          }
+        }
+      }
+    }
   }
 
-  for (const c of candidates.slice(0, 20)) {
-    if (await verifyPage(page, c.url, query)) {
-      return { best: c, candidates };
-    }
+  const rank = c => {
+    const sourceRank = String(c.source || '').startsWith('tavily:') ? 0 : 1;
+    const kindRank = { series: 0, params: 1, community: 2 }[c.kind] ?? 9;
+    return [sourceRank, kindRank];
+  };
+  candidates.sort((a, b) => {
+    const ra = rank(a), rb = rank(b);
+    return ra[0] - rb[0] || ra[1] - rb[1];
+  });
+
+  for (const c of candidates.slice(0, 8)) {
+    const verifiedUrl = await verifyDongchediSeries(page, c.id, query);
+    if (verifiedUrl) return { best: { ...c, url: verifiedUrl }, candidates };
   }
 
   return { best: null, candidates };
@@ -157,9 +224,7 @@ async function main() {
 
   const proxyServer = process.env.PLAYWRIGHT_PROXY_SERVER || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '';
   const launchOptions = { headless: true };
-  if (proxyServer) {
-    launchOptions.proxy = { server: proxyServer };
-  }
+  if (proxyServer) launchOptions.proxy = { server: proxyServer };
 
   const browser = await chromium.launch(launchOptions);
   const context = await browser.newContext({
@@ -182,7 +247,7 @@ async function main() {
 main().catch(err => {
   const payload = {
     error: String(err && err.message ? err.message : err),
-    hint: '检查代理/网络；可设置 PLAYWRIGHT_PROXY_SERVER 或 HTTP_PROXY / HTTPS_PROXY 后重试'
+    hint: '检查代理/网络；可设置 PLAYWRIGHT_PROXY_SERVER 或 HTTP_PROXY / HTTPS_PROXY 后重试；Playwright 版还依赖 TAVILY_API_KEY 做懂车帝候选召回'
   };
   console.error(JSON.stringify(payload, null, 2));
   process.exit(1);
