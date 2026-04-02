@@ -114,6 +114,17 @@ def verify_dongchedi_series(series_id: str, query: str) -> bool:
     return matches_text(clean_html(html), query)
 
 
+def evidence_matches_query(item: Dict[str, Any], query: str) -> bool:
+    parts = [
+        item.get('title', ''),
+        item.get('snippet', ''),
+        item.get('content', ''),
+        item.get('evidence_text', ''),
+    ]
+    text = '\n'.join([p for p in parts if p])
+    return matches_text(text, query)
+
+
 def normalize_query_variants(query: str) -> List[str]:
     variants = [query]
     spaced = re.sub(r'([A-Za-z0-9])(?=(PLUS|PRO|MAX|EV|DM|L)\b)', r'\1 ', query, flags=re.I)
@@ -255,7 +266,7 @@ def search_dongchedi(query: str) -> Dict[str, Any]:
                     if evidence_match:
                         collect_id(m.group(1), f"tavily:{tq}", 'params', url, f"{title}\n{snippet}")
 
-    # 2) 旧站内链路保留为补充，不再做主路径
+    # 2) 旧站内链路保留为补充，但必须带明确车型文本证据，避免脏候选灌进来
     encoded = urllib.parse.quote(query)
     urls = [
         f"https://www.dongchedi.com/search?keyword={encoded}",
@@ -267,16 +278,20 @@ def search_dongchedi(query: str) -> Dict[str, Any]:
         except Exception:
             continue
 
-        for m in re.finditer(r"https?://www\.dongchedi\.com/auto/series/(\d+)", html):
-            collect_id(m.group(1), url, 'series', m.group(0))
-        for m in re.finditer(r'"/auto/series/(\d+)"', html):
-            collect_id(m.group(1), url, 'series')
-        for m in re.finditer(r'https?://www\.dongchedi\.com/community/(\d+)(?:/wenda)?', html):
-            collect_id(m.group(1), url, 'community', m.group(0))
-        for m in re.finditer(r'https?://(?:m\.)?www\.dongchedi\.com/auto/params-carIds-(?:x-)?(\d+)', html):
-            collect_id(m.group(1), url, 'params', m.group(0))
+        page_text = clean_html(html)
+        if not matches_text(page_text, query):
+            continue
 
-    uniq = dedupe(candidates)
+        for m in re.finditer(r"https?://www\.dongchedi\.com/auto/series/(\d+)", html):
+            collect_id(m.group(1), url, 'series', m.group(0), page_text[:2000])
+        for m in re.finditer(r'"/auto/series/(\d+)"', html):
+            collect_id(m.group(1), url, 'series', evidence_text=page_text[:2000])
+        for m in re.finditer(r'https?://www\.dongchedi\.com/community/(\d+)(?:/wenda)?', html):
+            collect_id(m.group(1), url, 'community', m.group(0), page_text[:2000])
+        for m in re.finditer(r'https?://(?:m\.)?www\.dongchedi\.com/auto/params-carIds-(?:x-)?(\d+)', html):
+            collect_id(m.group(1), url, 'params', m.group(0), page_text[:2000])
+
+    uniq = [c for c in dedupe(candidates) if evidence_matches_query(c, query)]
 
     def rank(c: Dict[str, Any]):
         source = c.get('source', '')
@@ -285,8 +300,15 @@ def search_dongchedi(query: str) -> Dict[str, Any]:
         kind_rank = {'series': 0, 'params': 1, 'community': 2}.get(kind, 9)
         return (source_rank, kind_rank)
 
-    # Tavily 候选优先，站内脏搜索候选靠后
-    ordered = sorted(uniq, key=rank)
+    # Tavily 候选优先，站内脏搜索候选靠后；同时优先保留带明确 evidence_url 的候选
+    ordered = sorted(
+        uniq,
+        key=lambda c: (
+            rank(c),
+            0 if c.get('evidence_url') else 1,
+            0 if c.get('kind') == 'series' else 1,
+        )
+    )
     for c in ordered[:8]:
         if verify_dongchedi_series(c['id'], query):
             return {"site": "dongchedi", "best": c, "candidates": ordered[:10], "queryVariants": query_variants}

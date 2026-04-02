@@ -58,6 +58,10 @@ python3 skills/vehicle-id-finder/scripts/find_vehicle_ids.py "风云X3PLUS" --si
 node skills/vehicle-id-finder/scripts/find_vehicle_ids_playwright.js --json "风云X3PLUS"
 ```
 
+当前 Playwright 版已增加两层增强：
+- 分站独立容错：某一站失败时，不再拖垮另一站结果
+- Python fallback：Playwright 原生链路未命中时，会回退到 Python 版兜底
+
 如果当前环境需要代理：
 
 ```bash
@@ -88,6 +92,7 @@ node skills/vehicle-id-finder/scripts/find_vehicle_ids_playwright.js --json "风
 - `params-carIds-x-<id>`、`community/<id>`、`community/<id>/wenda` 都可以作为候选来源
 - 最终统一回填验证 `/auto/series/<id>`
 - 必须过滤掉标题/snippet 明显命中近似车型的脏候选
+- 站内旧搜索链路只作为补充来源，必须带明确车型文本证据后才允许进入候选
 
 ## 已验证样例
 
@@ -101,59 +106,14 @@ node skills/vehicle-id-finder/scripts/find_vehicle_ids_playwright.js --json "风
 - 汽车之家：`7411`
 - 懂车帝：`9436`
 
-## 已知限制
-
-- 站点搜索结构会变，脚本需要持续维护
-- 汽车之家里 `seriesId` 与 `specId` 不是一回事，不能混用
-- 懂车帝站内搜索结果可能很脏，所以当前实现优先依赖 Tavily 候选召回，再做页面回填校验
-- 某些车型如果名字过短、过泛，仍然可能需要增加额外过滤条件
-- Playwright 版目前还没有完全同步 Python 版的所有增强逻辑，当前更推荐 Python 版做稳定提取
-
-## 推荐工作流
-
-1. 用户给自然语言车型名
-2. 同时查询汽车之家与懂车帝
-3. 汽车之家：返回口碑页 `seriesId`
-4. 懂车帝：返回 `/auto/series/<id>`
-5. 把结果继续喂给口碑采集或车型数据抓取 skill
-
-## 输出建议
-
-默认输出：
-
-- 车型名
-- 汽车之家 `seriesId` + 可验证 URL
-- 懂车帝 `seriesId` + 可验证 URL
-- 若有歧义，附候选项而不是硬猜
-
 ## 注意
 
 - 这类站点搜索结构会变，脚本要允许持续修正
 - 汽车之家 `seriesId` 与 `specId` 不是一回事
 - 懂车帝站内搜索结果可能很脏，优先相信经过 Tavily + 页面回填校验后的结果
-- Python 版现在已经适合做轻量稳定提取；Playwright 版适合后续继续增强
-
-## 测试
-
-### 本地最小回归
-
-```bash
-python3 scripts/test_cases.py
-```
-
-当前内置了两个样例：
-- `风云X3PLUS`
-- `风云T11`
-
-### GitHub Actions
-
-仓库提供了一个最小 CI：
-- Python 脚本语法检查
-- Node / Playwright 脚本语法检查
-
-说明：
-- 目前 Actions 默认不跑真实联网回归，避免外部站点波动导致 CI 频繁误报
-- 真正的联网回归仍建议在本地或人工巡检时执行
+- Python 版现在已经适合做轻量稳定提取
+- Playwright 版当前已具备独立容错 + Python fallback，稳定性比早期版本明显更好
+- 但如果你追求最稳的结果，当前仍建议优先使用 Python 版
 
 ## 打包
 
