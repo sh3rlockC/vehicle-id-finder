@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.1
+## v0.1.2
 
 - Fixed single-site failures no longer aborting the whole Playwright lookup flow
 - Added independent Autohome / Dongchedi error isolation in the Playwright script
