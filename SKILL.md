@@ -69,6 +69,9 @@ python3 skills/vehicle-id-finder/scripts/find_vehicle_ids.py "风云X3PLUS" --js
 - 推荐查询词：`site:k.autohome.com.cn <车型名>`
 - 若命中 `k.autohome.com.cn/<seriesId>/<specId>` 这类 URL，优先取前半段 `<seriesId>` 作为结果
 - 若只命中 `k.autohome.com.cn/spec/<specId>/`，先把它当作“车型命中证据”，再继续反查或补查 `seriesId`
+- **命中 spec 页不算完成。** 只有把最终汽车之家 `seriesId` 反查出来，流程才算完成；不能只返回 `specId`，也不能只汇报“命中了 spec 页”
+- 反查 `seriesId` 时，优先继续寻找同车型的 `k.autohome.com.cn/<seriesId>` 或 `k.autohome.com.cn/<seriesId>/<specId>` 口碑链路；若拿到后者，取前半段 `<seriesId>`
+- 如果当前只拿到 spec 页，默认下一步就是继续搜索/验证，直到拿到可用的 `seriesId`；除非多轮校验后仍失败，才允许回复“暂未找到 seriesId，但已命中这个 spec 页作为候选证据”
 - 对提取出的汽车之家 `seriesId`，必须补一轮直链确认：访问 `https://k.autohome.com.cn/<seriesId>?dimensionid=10&order=0&yearid=0#listcontainer`，确认页面标题或正文明确包含目标车型名
 - 只有当直链确认通过时，才把该 `seriesId` 作为正式结果输出
 

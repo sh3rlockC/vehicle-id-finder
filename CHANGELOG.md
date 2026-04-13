@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.3
+
+- Clarified the Autohome spec-page fallback rule in `SKILL.md`
+- Made it explicit that hitting `k.autohome.com.cn/spec/<specId>/` does not complete the lookup
+- Required continuing fallback from spec evidence to a verified Autohome `seriesId` before reporting success
+- Allowed reporting a spec page only as candidate evidence when repeated seriesId backfill still fails
+
 ## v0.1.2
 
 - Fixed single-site failures no longer aborting the whole Playwright lookup flow
