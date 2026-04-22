@@ -123,3 +123,10 @@ node skills/vehicle-id-finder/scripts/find_vehicle_ids_playwright.js --json "风
 cd skills
 zip -r ../vehicle-id-finder.skill vehicle-id-finder
 ```
+
+## 更新记录与发版
+
+- 面向用户的变更统一记在 [`CHANGELOG.md`](./CHANGELOG.md)
+- 发版前先更新 `Unreleased`，再整理成对应版本条目
+- GitHub Release notes 最好和 `CHANGELOG.md` 对齐，避免两边内容越写越散
+
